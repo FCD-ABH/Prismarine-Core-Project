@@ -1,4 +1,4 @@
-# Minecraft Server Manager
+# Minecraft Server Manager 
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.70+-orange)](https://www.rust-lang.org/)
@@ -121,4 +121,4 @@ MIT License
 
 ## 📧 サポート
 
-問題が発生した場合は、GitHubのIssuesでご報告ください。
+問題が発生した場合は、GitHubのIssues、後ほど公開のDiscord serverでご報告ください。
