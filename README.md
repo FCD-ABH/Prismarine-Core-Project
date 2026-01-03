@@ -113,7 +113,7 @@ npm run tauri build
 
 ## 📝 ライセンス
 
-MIT License
+[これをお読みください](https://github.com/Cajuut/Prismarine-Core-Project/blob/main/LICENSE)
 
 ## 🤝 貢献
 
