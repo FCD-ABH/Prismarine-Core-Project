@@ -487,6 +487,41 @@ async fn restart_server(server_id: String, state: State<'_, AppState>) -> Result
 }
 
 #[tauri::command]
+async fn get_ops(
+    server_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<server_manager::OpEntry>, String> {
+    let manager = state.server_manager.lock().await;
+    manager.get_ops(&server_id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn grant_op(
+    server_id: String,
+    player: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let manager = state.server_manager.lock().await;
+    manager
+        .grant_op(&server_id, &player)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn revoke_op(
+    server_id: String,
+    player: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let manager = state.server_manager.lock().await;
+    manager
+        .revoke_op(&server_id, &player)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn get_online_players(
     server_id: String,
     state: State<'_, AppState>,
@@ -807,6 +842,9 @@ pub fn run() {
             add_proxy_server,
             remove_proxy_server,
             configure_backend_for_proxy,
+            get_ops,
+            grant_op,
+            revoke_op,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

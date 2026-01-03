@@ -139,7 +139,10 @@ function initializeEventListeners() {
     });
 
     // Server Detail View Controls
-    document.getElementById('back-to-servers-btn').onclick = () => switchView('servers');
+    document.getElementById('back-to-servers-btn').onclick = () => {
+        if (typeof cleanupDetailIntervals === 'function') cleanupDetailIntervals();
+        switchView('servers');
+    };
     document.getElementById('detail-start-btn').onclick = () => currentDetailServerId && startServer(currentDetailServerId);
     document.getElementById('detail-stop-btn').onclick = () => currentDetailServerId && stopServer(currentDetailServerId);
     document.getElementById('detail-delete-btn').onclick = () => currentDetailServerId && deleteServer(currentDetailServerId);
@@ -658,7 +661,11 @@ async function deleteServer(id) {
         await invoke('delete_server', { serverId: id });
         showNotification('サーバーを削除しました', 'success');
         await loadServers();
-        if (currentDetailServerId === id) switchView('servers');
+        await loadServers();
+        if (currentDetailServerId === id) {
+            if (typeof cleanupDetailIntervals === 'function') cleanupDetailIntervals();
+            switchView('servers');
+        }
     } catch (err) {
         showNotification(`削除失敗: ${err}`, 'error');
     }
@@ -741,11 +748,15 @@ async function showServerDetail(id) {
 
     // Refresh Logs
     refreshDetailLogs();
+    refreshPlayerList(); // Initial load
+
     if (detailLogInterval) clearInterval(detailLogInterval);
     if (detailUptimeInterval) clearInterval(detailUptimeInterval);
+    if (playerListInterval) clearInterval(playerListInterval);
 
     if (isRunning) {
         detailLogInterval = setInterval(refreshDetailLogs, 2000);
+        playerListInterval = setInterval(refreshPlayerList, 3000); // Check players every 3s
 
         // Uptime Updater
         const updateUptime = () => {
@@ -2525,8 +2536,15 @@ function initProxyNodeEditor(pn) {
     const proxy = servers.find(s => s.id === pn.proxyId);
     if (!proxy) return;
 
-    // Get all servers for this ProxyNode (proxy + backends)
-    const proxyNodeServers = [proxy, ...pn.backends.map(id => servers.find(s => s.id === id)).filter(Boolean)];
+    // Get all servers for this ProxyNode (backends + any other nodes on canvas)
+    // We scan networkNodes to find any servers that are placed but maybe not connected
+    const placedNodeIds = Object.keys(networkNodes || {});
+    const relatedServerIds = [...new Set([...pn.backends, ...placedNodeIds])];
+
+    // Filter to ensure they are valid non-proxy servers (or the proxy itself)
+    const proxyNodeServers = relatedServerIds
+        .map(id => servers.find(s => s.id === id))
+        .filter(s => s && (s.id === pn.proxyId || !['Velocity', 'Waterfall', 'BungeeCord'].includes(s.server_type)));
 
     // Load saved positions for this ProxyNode
     const savedLayout = localStorage.getItem(`proxyNodeLayout_${pn.id}`);
@@ -2543,6 +2561,26 @@ function initProxyNodeEditor(pn) {
         networkNodes = {};
         networkConnections = [];
     }
+
+    // sync connections with backends
+    // Ensure all backends are connected to the proxy
+    pn.backends.forEach(backendId => {
+        const exists = networkConnections.some(c =>
+            (c.from === pn.proxyId && c.to === backendId) ||
+            (c.from === backendId && c.to === pn.proxyId)
+        );
+        if (!exists) {
+            networkConnections.push({ from: pn.proxyId, to: backendId });
+        }
+    });
+
+    // Remove connections to servers that are no longer backends
+    networkConnections = networkConnections.filter(c => {
+        // Keep checking if it involves the proxy and a valid backend
+        if (c.from === pn.proxyId) return pn.backends.includes(c.to);
+        if (c.to === pn.proxyId) return pn.backends.includes(c.from);
+        return false; // Remove connections unrelated to this proxy group
+    });
 
     // Reset pan offset
     canvasOffset = { x: 0, y: 0 };
@@ -2586,10 +2624,12 @@ function renderProxyNodePalette(pn) {
     const palette = document.getElementById('network-server-palette');
     if (!palette) return;
 
-    // Show servers not yet in this ProxyNode
+    // Show servers not yet in this ProxyNode AND not on the canvas
+    const placedServerIds = Object.keys(networkNodes);
     const availableServers = servers.filter(s =>
         !['Velocity', 'Waterfall', 'BungeeCord'].includes(s.server_type) &&
-        !pn.backends.includes(s.id)
+        !pn.backends.includes(s.id) &&
+        !placedServerIds.includes(s.id)
     );
 
     if (availableServers.length === 0) {
@@ -2615,7 +2655,13 @@ function renderProxyNodeCanvas(pn) {
     if (!nodesGroup || !connectionsGroup) return;
 
     const proxy = servers.find(s => s.id === pn.proxyId);
-    const proxyNodeServers = [proxy, ...pn.backends.map(id => servers.find(s => s.id === id)).filter(Boolean)];
+
+    const placedNodeIds = Object.keys(networkNodes || {});
+    const relatedServerIds = [...new Set([...pn.backends, ...placedNodeIds, pn.proxyId])];
+
+    const proxyNodeServers = relatedServerIds
+        .map(id => servers.find(s => s.id === id))
+        .filter(s => s && (s.id === pn.proxyId || !['Velocity', 'Waterfall', 'BungeeCord'].includes(s.server_type)));
 
     // Apply canvas offset for panning
     nodesGroup.setAttribute('transform', `translate(${canvasOffset.x}, ${canvasOffset.y})`);
@@ -2627,10 +2673,22 @@ function renderProxyNodeCanvas(pn) {
         const toPos = networkNodes[conn.to];
         if (!fromPos || !toPos) return '';
 
+        // Identify which server is the backend (to remove it)
+        const isFromProxy = servers.find(s => s.id === conn.from)?.server_type === 'Velocity' ||
+            servers.find(s => s.id === conn.from)?.server_type === 'Waterfall' ||
+            servers.find(s => s.id === conn.from)?.server_type === 'BungeeCord';
+
+        const backendId = isFromProxy ? conn.to : conn.from;
+
         return `
             <g class="connection" data-index="${idx}">
                 <line x1="${fromPos.x}" y1="${fromPos.y}" x2="${toPos.x}" y2="${toPos.y}" 
                       stroke="#6366f1" stroke-width="2" marker-end="url(#arrowhead)" />
+                <circle cx="${(fromPos.x + toPos.x) / 2}" cy="${(fromPos.y + toPos.y) / 2}" r="8" 
+                        fill="rgba(239, 68, 68, 0.8)" style="cursor: pointer;" 
+                        onclick="removeServerFromProxyNode('${backendId}')" />
+                <text x="${(fromPos.x + toPos.x) / 2}" y="${(fromPos.y + toPos.y) / 2 + 4}" 
+                      text-anchor="middle" fill="white" font-size="10" style="pointer-events: none;">×</text>
             </g>
         `;
     }).join('');
@@ -2652,6 +2710,15 @@ function renderProxyNodeCanvas(pn) {
                       fill="${fillColor}" stroke="${statusColor}" stroke-width="2" />
                 <text x="0" y="-3" text-anchor="middle" fill="white" font-size="12" font-weight="bold">${escapeHtml(s.name)}</text>
                 <text x="0" y="12" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="10">${s.server_type} :${s.port}</text>
+                ${!isProxy ? `
+                <!-- Delete Node Button (Top Right) -->
+                <circle cx="55" cy="-20" r="8" fill="#ef4444" 
+                        style="cursor: pointer;"
+                        onmousedown="event.stopPropagation()"
+                        onclick="removeNodeFromCanvas(event, '${s.id}')" />
+                <text x="55" y="-16" text-anchor="middle" fill="white" font-size="10" font-weight="bold" 
+                      style="pointer-events: none; user-select: none;">×</text>
+                ` : ''}
             </g>
         `;
     }).join('');
@@ -2739,16 +2806,45 @@ async function removeServerFromProxyNode(serverId) {
         pn.backends = pn.backends.filter(id => id !== serverId);
         saveProxyNodes();
 
-        // Remove from canvas
-        delete networkNodes[serverId];
+        // REMOVED: Do not delete from canvas here.
+        // delete networkNodes[serverId];
         networkConnections = networkConnections.filter(c => c.from !== serverId && c.to !== serverId);
 
-        initProxyNodeEditor(pn);
-        showNotification(`${server.name} を削除しました`, 'success');
+        // Save current layout to ensure the node existence is persisted
+        saveProxyNodeLayout();
+
+        // Re-render specific components instead of full re-init
+        renderProxyNodeCanvas(pn);
+        renderProxyNodeConnectionList(pn);
+        renderProxyNodePalette(pn);
+
+        showNotification(`${server.name} を切断しました`, 'success');
     } catch (e) {
         console.error('Failed to remove server:', e);
-        showNotification('削除に失敗しました', 'error');
     }
+}
+
+// Completely remove node from canvas (and disconnected if needed)
+async function removeNodeFromCanvas(event, serverId) {
+    if (event) event.stopPropagation();
+
+    const pn = proxyNodes.find(p => p.id === currentProxyNodeId);
+    if (!pn) return;
+
+    const confirmed = await showConfirmModal('このサーバーをキャンバスから削除しますか？');
+    if (!confirmed) return;
+
+    // If it's connected (backend), remove it properly first to clean up config
+    if (pn.backends.includes(serverId)) {
+        await removeServerFromProxyNode(serverId);
+    }
+
+    // Remove from visual nodes
+    delete networkNodes[serverId];
+    saveProxyNodeLayout();
+
+    // Re-render
+    initProxyNodeEditor(pn);
 }
 
 // Save layout for current ProxyNode
@@ -2910,3 +3006,90 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+// =============================================
+// Player Management Logic
+// =============================================
+
+let playerListInterval = null;
+let currentOnlinePlayers = new Set();
+let currentOps = [];
+
+async function refreshPlayerList() {
+    if (!currentDetailServerId) return;
+    try {
+        const [players, ops] = await Promise.all([
+            invoke('get_online_players', { serverId: currentDetailServerId }),
+            invoke('get_ops', { serverId: currentDetailServerId })
+        ]);
+
+        currentOnlinePlayers = new Set(players);
+        currentOps = ops || [];
+        updatePlayerListUI();
+
+        // Update simple counter
+        const countEl = document.getElementById('detail-players');
+        if (countEl) {
+            const currentText = countEl.textContent || '';
+            const max = currentText.split('/').pop().trim() || '20';
+            countEl.textContent = `${players.length} / ${max}`;
+        }
+    } catch (e) {
+        // Silent fail as it might be frequent
+        console.debug('Failed to refresh player list:', e);
+    }
+}
+
+function updatePlayerListUI() {
+    const container = document.getElementById('player-list-container');
+    if (!container) return;
+
+    if (currentOnlinePlayers.size === 0) {
+        container.innerHTML = '<div style="color: #888; text-align: center; padding: 10px; font-size: 0.9em;">オンラインのプレイヤーはいません</div>';
+        return;
+    }
+
+    container.innerHTML = Array.from(currentOnlinePlayers).sort().map(name => {
+        const isOp = currentOps.some(op => op.name === name);
+        // Use 32px for avatar source
+        const faceUrl = `https://minotar.net/avatar/${name}/32`;
+
+        return `
+            <div style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-secondary); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <img src="${faceUrl}" style="width: 24px; height: 24px; border-radius: 4px; background: #333;" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22%23777%22><rect width=%2224%22 height=%2224%22/></svg>'">
+                    <span style="font-weight: 500; font-size: 0.95em;">${escapeHtml(name)}</span>
+                    ${isOp ? '<span style="background: #e67e22; color: white; padding: 1px 5px; border-radius: 4px; font-size: 0.7em; font-weight: bold;">OP</span>' : ''}
+                </div>
+                <button class="${isOp ? 'btn-danger' : 'btn-secondary'}" 
+                        style="padding: 4px 10px; font-size: 0.8em; height: auto;"
+                        onclick="toggleOp('${name}', ${isOp})">
+                    ${isOp ? '剥奪' : 'OP付与'}
+                </button>
+            </div>
+        `;
+    }).join('');
+}
+
+async function toggleOp(name, currentStatus) {
+    if (!currentDetailServerId) return;
+    const action = currentStatus ? 'revoke_op' : 'grant_op';
+    const msg = currentStatus ? `${name}からOPを剥奪しています...` : `${name}にOPを付与しています...`;
+
+    showNotification(msg, 'info');
+    try {
+        await invoke(action, { serverId: currentDetailServerId, player: name });
+        showNotification(currentStatus ? 'OPを剥奪しました' : 'OPを付与しました', 'success');
+        setTimeout(refreshPlayerList, 500); // Trigger refresh shortly after
+    } catch (e) {
+        showNotification(`操作失敗: ${e}`, 'error');
+    }
+}
+
+function cleanupDetailIntervals() {
+    if (detailLogInterval) clearInterval(detailLogInterval);
+    if (detailUptimeInterval) clearInterval(detailUptimeInterval);
+    if (playerListInterval) clearInterval(playerListInterval);
+    detailLogInterval = null;
+    detailUptimeInterval = null;
+    playerListInterval = null;
+}

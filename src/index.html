@@ -439,9 +439,17 @@
 
                             <div id="tab-content-players" class="detail-tab-content hidden">
                                 <div class="detail-card">
-                                    <h3>オンラインプレイヤー</h3>
-                                    <div class="players-list" id="detail-players-list">
-                                        <div class="empty-state">オフラインまたはプレイヤーはいません</div>
+                                    <div
+                                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                        <h3 style="margin: 0;">オンラインプレイヤー & OP管理</h3>
+                                        <button class="btn btn-secondary btn-sm" onclick="refreshPlayerList()"
+                                            style="min-width: 80px;">
+                                            🔄 更新
+                                        </button>
+                                    </div>
+                                    <div id="player-list-container"
+                                        style="display: flex; flex-direction: column; gap: 8px; max-height: 500px; overflow-y: auto;">
+                                        <div style="font-size: 0.9em; color: #888; text-align: center;">読み込み中...</div>
                                     </div>
                                 </div>
                             </div>
@@ -579,6 +587,8 @@
                                     </div>
                                 </div>
                             </div>
+
+
 
                             <div class="detail-info-card">
                                 <h3>クロスプラットフォーム</h3>

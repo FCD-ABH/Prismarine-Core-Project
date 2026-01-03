@@ -61,6 +61,15 @@ fn default_min_memory() -> String {
     "1G".to_string()
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OpEntry {
+    pub uuid: String,
+    pub name: String,
+    pub level: i32,
+    #[serde(rename = "bypassesPlayerLimit")]
+    pub bypasses_player_limit: bool,
+}
+
 /// Parse memory string (e.g., "4G", "2048M") to megabytes
 fn parse_memory_mb(memory: &str) -> Option<u64> {
     let memory = memory.trim().to_uppercase();
@@ -475,6 +484,35 @@ impl ServerManager {
 
     pub async fn get_server(&self, server_id: &str) -> Option<ServerInfo> {
         self.servers.lock().await.get(server_id).cloned()
+    }
+
+    /// Get list of operators from ops.json
+    pub async fn get_ops(&self, server_id: &str) -> Result<Vec<OpEntry>> {
+        let server = self
+            .get_server(server_id)
+            .await
+            .context("Server not found")?;
+
+        let ops_path = server.path.join("ops.json");
+        if !ops_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = fs::read_to_string(&ops_path).await?;
+        let ops: Vec<OpEntry> = serde_json::from_str(&content).unwrap_or_default();
+        Ok(ops)
+    }
+
+    /// Grant OP status to a player
+    pub async fn grant_op(&self, server_id: &str, player: &str) -> Result<()> {
+        self.send_command(server_id, &format!("op {}", player))
+            .await
+    }
+
+    /// Revoke OP status from a player
+    pub async fn revoke_op(&self, server_id: &str, player: &str) -> Result<()> {
+        self.send_command(server_id, &format!("deop {}", player))
+            .await
     }
 
     pub async fn get_plugins_path(&self, server_id: &str) -> Result<PathBuf> {
@@ -2078,7 +2116,7 @@ player-info-forwarding-mode = "modern"
 forwarding-secret-file = "forwarding.secret"
 
 [servers]
-{} = "{}"
+"{}" = "{}"
 try = ["{}"]
 
 [forced-hosts]
@@ -2100,7 +2138,30 @@ try = ["{}"]
                     return Ok(());
                 };
 
-                let mut config: toml::Value = toml::from_str(&content)?;
+                let mut config: toml::Value = match toml::from_str(&content) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        // If parsing fails (e.g. invalid TOML from previous version), reset config
+                        let default_config = format!(
+                            r#"# Velocity Configuration - Auto-generated
+online-mode = true
+player-info-forwarding-mode = "modern"
+forwarding-secret-file = "forwarding.secret"
+
+[servers]
+"{}" = "{}"
+try = ["{}"]
+
+[forced-hosts]
+
+[advanced]
+"#,
+                            name, address, name
+                        );
+                        fs::write(&config_path, &default_config).await?;
+                        toml::from_str(&default_config)?
+                    }
+                };
 
                 // Ensure modern forwarding is enabled
                 if let Some(table) = config.as_table_mut() {
@@ -2283,7 +2344,13 @@ listeners:
                 let mut config: toml::Value = toml::from_str(&content)?;
 
                 if let Some(servers) = config.get_mut("servers").and_then(|v| v.as_table_mut()) {
+                    // Remove server definition
                     servers.remove(name);
+
+                    // Remove from try array if present
+                    if let Some(try_list) = servers.get_mut("try").and_then(|v| v.as_array_mut()) {
+                        try_list.retain(|v| v.as_str() != Some(name));
+                    }
                 }
 
                 let new_content = toml::to_string(&config)?;
@@ -2369,33 +2436,82 @@ listeners:
                 new_secret
             };
 
-            // Update paper-global.yml if it exists
-            let paper_config_path = backend.path.join("config").join("paper-global.yml");
-            if paper_config_path.exists() {
-                let content = fs::read_to_string(&paper_config_path).await?;
-                let mut config: serde_yaml::Value = serde_yaml::from_str(&content)?;
+            // Ensure config directory exists
+            let config_dir = backend.path.join("config");
+            if !config_dir.exists() {
+                let _ = fs::create_dir_all(&config_dir).await;
+            }
 
-                if let Some(proxies) = config.get_mut("proxies") {
-                    if let Some(velocity) = proxies.get_mut("velocity") {
-                        if let Some(mapping) = velocity.as_mapping_mut() {
-                            mapping.insert(
-                                serde_yaml::Value::String("enabled".to_string()),
-                                serde_yaml::Value::Bool(true),
-                            );
-                            mapping.insert(
-                                serde_yaml::Value::String("online-mode".to_string()),
-                                serde_yaml::Value::Bool(true),
-                            );
-                            mapping.insert(
-                                serde_yaml::Value::String("secret".to_string()),
-                                serde_yaml::Value::String(secret),
-                            );
-                        }
+            // Update paper-global.yml
+            let paper_config_path = config_dir.join("paper-global.yml");
+
+            let mut config = if paper_config_path.exists() {
+                let content = fs::read_to_string(&paper_config_path)
+                    .await
+                    .unwrap_or_default();
+                serde_yaml::from_str(&content)
+                    .unwrap_or_else(|_| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()))
+            } else {
+                serde_yaml::Value::Mapping(serde_yaml::Mapping::new())
+            };
+
+            // Ensure structure exists: proxies -> velocity
+            // We use a slightly verbose way to ensure nested maps exist
+            if !config.is_mapping() {
+                config = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+            }
+
+            if let Some(mapping) = config.as_mapping_mut() {
+                // Ensure proxies section
+                let proxies = mapping
+                    .entry(serde_yaml::Value::String("proxies".to_string()))
+                    .or_insert(serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+
+                if let Some(proxies_map) = proxies.as_mapping_mut() {
+                    // Ensure velocity section
+                    let velocity = proxies_map
+                        .entry(serde_yaml::Value::String("velocity".to_string()))
+                        .or_insert(serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+
+                    if let Some(velocity_map) = velocity.as_mapping_mut() {
+                        velocity_map.insert(
+                            serde_yaml::Value::String("enabled".to_string()),
+                            serde_yaml::Value::Bool(true),
+                        );
+                        velocity_map.insert(
+                            serde_yaml::Value::String("online-mode".to_string()),
+                            serde_yaml::Value::Bool(true),
+                        );
+                        velocity_map.insert(
+                            serde_yaml::Value::String("secret".to_string()),
+                            serde_yaml::Value::String(secret),
+                        );
                     }
                 }
+            }
 
-                let new_content = serde_yaml::to_string(&config)?;
-                fs::write(paper_config_path, new_content).await?;
+            if let Ok(new_content) = serde_yaml::to_string(&config) {
+                let _ = fs::write(paper_config_path, new_content).await;
+            }
+        }
+
+        // Update bukkit.yml connection-throttle to -1
+        let bukkit_config_path = backend.path.join("bukkit.yml");
+        if bukkit_config_path.exists() {
+            let content = fs::read_to_string(&bukkit_config_path).await?;
+            // Use serde_yaml::Value to preserve other fields
+            if let Ok(mut config) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                if let Some(settings) = config.get_mut("settings").and_then(|v| v.as_mapping_mut())
+                {
+                    settings.insert(
+                        serde_yaml::Value::String("connection-throttle".to_string()),
+                        serde_yaml::Value::Number(serde_yaml::Number::from(-1)),
+                    );
+
+                    if let Ok(new_content) = serde_yaml::to_string(&config) {
+                        fs::write(bukkit_config_path, new_content).await?;
+                    }
+                }
             }
         }
 
