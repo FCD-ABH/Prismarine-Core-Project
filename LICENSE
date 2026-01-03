@@ -1,21 +1,91 @@
-MIT License
+5Prismarine Server Software Proprietary License
 
-Copyright (c) 2025 FCD-ABH
+Copyright (c) 2026 Limonada (任意団体)
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+================================================================================
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+重要な注意事項
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+本ソフトウェアはオープンソースソフトウェア（OSS）ではありません。
+
+ソースコードは透明性とセキュリティ検証の目的で公開されていますが、これは
+利用者に対して自由な改変・再配布の権利を付与するものではありません。
+
+================================================================================
+
+許可される行為
+
+以下の行為は、本ライセンスの下で明示的に許可されています:
+
+  ✓ 実行
+    本ソフトウェアを個人または商用目的で実行すること
+    （最大10インスタンスまで）
+
+  ✓ 閲覧
+    ソースコードを閲覧し、動作を検証すること
+
+  ✓ 利用
+    Minecraftサーバーの構築・運営に本ソフトウェアを使用すること
+
+================================================================================
+
+禁止される行為
+
+以下の行為は、明示的に禁止されています:
+
+  ✗ 再配布
+    バイナリまたはソースコードを第三者に配布、転送、販売、公開すること
+
+  ✗ 改変
+    ソースコードを修正、変更、機能追加すること
+    （個人のローカル環境でのテスト目的を含む）
+
+  ✗ 派生物の作成
+    本ソフトウェアの全部または一部を利用した派生ソフトウェアを作成すること
+
+  ✗ リバースエンジニアリング
+    バイナリファイルを逆コンパイル、逆アセンブル、または解析すること
+
+  ✗ 商標の無断使用
+    「Prismarine Server Software」「PSS」「Limonada」の名称やロゴを
+    無断で使用すること
+
+================================================================================
+
+完全な利用規約
+
+本ライセンスは概要版です。
+完全な利用規約およびプライバシーポリシーについては、TERMS.md をご確認ください。
+
+  完全版: TERMS.md
+  URL: https://github.com/Cajuut/Prismarine-Core-Project/blob/main/TERMS.md
+
+================================================================================
+
+免責事項
+
+本ソフトウェアは「現状有姿（AS IS）」で提供されます。
+
+当組織は、本ソフトウェアの動作の完全性、安全性、特定の目的への適合性に
+ついて、いかなる保証も行いません。本ソフトウェアの使用により生じた
+いかなる損害についても、当組織は一切の責任を負いません。
+
+本ソフトウェアおよび当組織（Limonada）は、Mojang Studios、Microsoft 
+Corporation、およびその関連会社とは一切関係がありません。
+
+Minecraft® は Mojang Studios の商標です。本ソフトウェアは、Minecraft 
+サーバーの管理を支援する独立した第三者ツールであり、Mojang Studios による
+公式製品または承認された製品ではありません。
+
+================================================================================
+
+お問い合わせ
+
+組織名: Limonada（任意団体）
+Discord: https://discord.gg/3VjEwNTCft
+
+================================================================================
+
+発効日: 2026年1月2日
+最終更新: 2026年1月3日
